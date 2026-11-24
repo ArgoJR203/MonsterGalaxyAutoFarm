@@ -76,8 +76,8 @@ game_farm_bot/
 
 1. Clone the repository and enter the project directory:
    ```bash
-   git clone <your-repo-url>
-   cd game_farm_bot
+   git clone https://github.com/ArgoJR203/MonsterGalaxyAutoFarm
+   cd MonsterGalaxyAutoFarm
    ```
 
 2. *(Optional)* Create and activate a virtual environment:
