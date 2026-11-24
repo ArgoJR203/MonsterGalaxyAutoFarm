@@ -11,9 +11,12 @@ Run the game inside an isolated background Playwright Chromium browser so you ca
 - **Background Browser Automation (WebApp Mode):** Runs the game in a dedicated Chromium session (`.browser_profile/`) with `page.screenshot()` and `page.mouse.click()`, leaving your main browser and physical mouse untouched.
 - **Interactive Map Node Picker:** Preview the live game canvas in the dashboard and click any node on the overworld map to save and farm custom coordinates.
 - **Custom Party Priority Order:** Enable/disable squad slots `1–6` and reorder their priority (e.g., `2 → 3 → 1`) so protected or low-level Mogas are skipped.
-- **Priority-Ordered 6-State FSM:** Evaluates states from `BATTLE_VICTORY` → `BATTLE_SELECT_MOGA` → `BATTLE_ACTIVE` → `BATTLE_READY` → `NODE_POPUP` → `MAP_IDLE`.
-- **Automatic Canvas Lock-On & Static-Ratio Scaling:** Detects the embedded game canvas inside the browser viewport (ignoring chat sidebars/toolbars) and scales templates uniformly.
-- **PP Exhaustion Guard & Dry-Run Mode:** Rotates fallback skills after `max_primary_turns` and supports dry-run logging without clicking.
+- **Priority-Ordered 8-State FSM:** Evaluates states from `QUEST_COMPLETE` → `CAPTURE_POPUP` → `BATTLE_VICTORY` → `BATTLE_SELECT_MOGA` → `BATTLE_ACTIVE` → `BATTLE_READY` → `NODE_POPUP` → `MAP_IDLE`.
+- **Quest Complete Auto-Dismiss (`✓`):** Automatically clicks the checkmark button when a `QUEST COMPLETE!` popup appears on the map.
+- **Accidental Capture Modal Failsafe (`X`):** Detects if `CAPTURE` was accidentally opened mid-battle and closes it automatically so combat resumes.
+- **Smart Upper-Skill PP Fallback & Mid-Battle Squad Switching:** Uses only **Upper-Left** and **Upper-Right** skills (never the two lower skills). Automatically detects when the primary upper skill is dimmed/out of PP and switches to the secondary upper skill; when **both** upper skills are out of PP, automatically swaps to the next alive team member in your party priority order (or halts safely if all enabled Mogas are out of PP).
+- **Multi-Arena Background-Invariant Vision:** Uses DOM `<canvas>` locking in Playwright, micro-scale template matching, masked `CHOOSE YOUR MOGA` text matching, and trimmed `Continue` button matching so the bot works reliably across different map and arena backgrounds.
+- **3-Tick Alive Check Debounce & Dry-Run Mode:** Retries transient battle-entry frames before halting, and supports dry-run logging without clicking.
 - **Classic Desktop Mode Included:** Still includes the standalone `mss` + `pyautogui` CLI runner (`python bot.py`).
 
 ---
@@ -29,7 +32,7 @@ MonsterGalaxyAutoFarm/
 ├── config.py                 # Reference dimensions, template paths, and default coordinates
 ├── vision.py                 # Canvas detection, template scaling/matching, and HP bar scanner
 ├── settings_store.py         # Thread-safe JSON persistence (settings.json)
-├── engine.py                 # Background Playwright worker & 6-state FSM controller
+├── engine.py                 # Background Playwright worker & 8-state FSM controller
 ├── webapp.py                 # FastAPI server & API endpoints
 ├── web/
 │   └── index.html            # WebApp dashboard UI (node picker, party priority, live logs)
@@ -37,6 +40,8 @@ MonsterGalaxyAutoFarm/
 ├── tools/
 │   └── setup_wizard.py       # Interactive ROI template cropper & calibration overlay tool
 └── templates/                # Reference UI landmark PNGs
+    ├── quest_ok.png          # "QUEST COMPLETE!" checkmark button
+    ├── capture_modal.png     # Capture modal "Moga Cash:" header (failsafe)
     ├── battle_continue.png
     ├── choose_moga.png
     ├── battle_capture.png
@@ -96,7 +101,7 @@ MonsterGalaxyAutoFarm/
 4. Configure your setup in the WebApp UI:
    - **Pick a Farm Node:** Click **Pick Node on Preview**, click any node on the live map preview, give it a name, and click **Save & Use**.
    - **Set Party Priority:** Reorder slots `1–6` with `▲` / `▼` and uncheck any slot you want to skip.
-   - **Combat & Safety:** Choose primary skill, `Max Primary Turns`, `Confidence Threshold`, or toggle **Dry-Run**.
+   - **Combat & Safety:** Choose primary skill (Upper-Left or Upper-Right), `Max Primary Turns`, `Confidence Threshold`, or toggle **Dry-Run**.
 5. Click **Start**. You can now cover the Playwright browser window with other apps or switch tabs in your main browser while the bot farms in the background.
 
 ---
@@ -130,6 +135,7 @@ Inspect `calibration_overlay.png` to confirm coordinate alignment.
 
 - **Game pauses when Playwright window is minimized:** Do **not** minimize the Playwright Chromium window to the taskbar; instead, leave it open behind your other windows (the engine launches Chromium with background-throttling disabled for occluded windows).
 - **`[HALT] No enabled alive Mogas found in priority list`**: Either all enabled squad slots fainted (`0 HP`) or all slots are unchecked in the Party Priority editor.
+- **`[HALT] All enabled alive Mogas are out of usable upper skills (PP)`**: Every alive Moga in your priority list has run out of PP on both Upper-Left and Upper-Right skills. Heal/restore your squad before restarting.
 - **`[WATCHDOG] No known screen matched`**: Check for depleted energy/coffee or an unexpected modal in the game browser window.
 
 ---
