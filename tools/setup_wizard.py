@@ -32,9 +32,9 @@ def save_calibration_overlay(screen, bbox) -> None:
 
     points = {
         "FARM_NODE": config.COORDS["farm_node"],
+        "CAPTURE_X": config.COORDS["capture_close"],
         "SKILL_TL": config.COORDS["skill_top_left"],
         "SKILL_TR": config.COORDS["skill_top_right"],
-        "SKILL_BL": config.COORDS["skill_bottom_left"],
     }
     for idx, slot in enumerate(config.COORDS["squad_slots"], start=1):
         points[f"SLOT_{idx}"] = slot

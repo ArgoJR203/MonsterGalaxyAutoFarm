@@ -16,16 +16,20 @@ TEMPLATE_REF_SIZE = (1024, 890)
 
 # Top-left (x, y) origin of each template inside TEMPLATE_REF_SIZE
 TEMPLATE_REF_ORIGINS = {
+    "quest_ok": (464, 718),
+    "capture_modal": (566, 374),
     "map_idle": (150, 678),
     "node_popup": (448, 676),
     "select_moga": (286, 626),
     "combat_ready": (454, 768),
     "combat_active": (454, 772),
-    "victory": (472, 318),
+    "victory": (478, 323),
 }
 
 # Template file paths
 TEMPLATE_PATHS = {
+    "quest_ok": "templates/quest_ok.png",
+    "capture_modal": "templates/capture_modal.png",
     "victory": "templates/battle_continue.png",
     "select_moga": "templates/choose_moga.png",
     "combat_active": "templates/battle_capture.png",
@@ -37,9 +41,9 @@ TEMPLATE_PATHS = {
 # Normalized (x, y) coordinates relative to the game window (0.0 to 1.0)
 COORDS = {
     "farm_node": (0.105, 0.672),
+    "capture_close": (0.8125, 0.2607),
     "skill_top_left": (0.315, 0.895),
     "skill_top_right": (0.685, 0.895),
-    "skill_bottom_left": (0.315, 0.960),
     "squad_slots": [
         (0.242, 0.815),
         (0.302, 0.815),

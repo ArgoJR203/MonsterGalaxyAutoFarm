@@ -1,82 +1,72 @@
-# Monster Galaxy Auto-Farm Bot
+# Monster Galaxy Auto-Farm
 
-A computer-vision desktop automation bot in Python for farming battle resources (XP, Blue Coffee, drops) on a targeted overworld map node in **Monster Galaxy**.
+A computer-vision automation bot and **WebApp control panel** for farming battle resources (XP, Blue Coffee, drops) on **Monster Galaxy** (`https://monstergalaxy.online`).
 
-Instead of relying on fragile fixed timers, every action is driven by a **Priority-Ordered Finite State Machine (FSM)** using DPI-aware screen capture (`mss`), OpenCV template matching (`opencv-python`) with automatic browser-canvas lock-on and static-ratio template scaling, and input automation (`pyautogui`).
-
----
-
-## How It Works
-
-On every tick (`~0.25s`), the bot captures the game canvas inside your browser window and checks UI landmarks in **strict priority order (1 → 6)** so it reacts immediately if an enemy faints early or a squad Moga is defeated:
-
-```text
-[6. MAP_IDLE] ──(Click Farm Node)──> [5. NODE_POPUP] ──(Click Blue GO!)──┐
-      ▲                                                                   │
-      │                                                                   ▼
-(Click Continue)                                              [2. BATTLE_SELECT_MOGA]
-      │                                                                   │
-[1. BATTLE_VICTORY] <──(Enemy Faints)── [3. BATTLE_ACTIVE] <──(Click Red GO!)── [4. BATTLE_READY]
-                                           │         ▲
-                                           └─(Loop)──┘ (Click Skill)
-```
-
-| Priority | State | Visual Trigger | Automated Action |
-| :---: | :--- | :--- | :--- |
-| **1** | `BATTLE_VICTORY` | Light-blue **Continue** button | Click **Continue** (ignores replay button) |
-| **2** | `BATTLE_SELECT_MOGA` | **CHOOSE YOUR MOGA** label | Scan squad slots `1–6` left-to-right and click first alive Moga |
-| **3** | `BATTLE_ACTIVE` | Center **CAPTURE** button | Click primary upper-left skill (rotates to fallback skills after PP limit) |
-| **4** | `BATTLE_READY` | Large red **GO!** button | Click red **GO!** |
-| **5** | `NODE_POPUP` | Light-blue **GO!** modal button | Click modal **GO!** |
-| **6** | `MAP_IDLE` | **DISCORD SERVER** overworld anchor | Click target farm node (`COORDS["farm_node"]`) |
+Run the game inside an isolated background Playwright Chromium browser so you can **switch tabs, browse, or work freely without losing your mouse cursor**, and configure everything from a browser dashboard at `http://127.0.0.1:8000`.
 
 ---
 
 ## Features
 
-- **Automatic Browser Canvas Lock-On:** Automatically locates the embedded game canvas inside your browser window (ignoring browser tabs, address bar, Global Chat sidebar, side padding, and taskbar) and re-locks if the window is resized.
-- **Static-Ratio Template Scaling:** Uniformly scales pre-cropped reference templates (`TEMPLATE_REF_SIZE`) to match any browser zoom or window size.
-- **HP-Aware Squad Selection:** Scans the HP bar strip below squad slots `1–6` for green, yellow, or orange bars (supporting partially damaged Mogas). Safely halts if all 6 slots have `0 HP`.
-- **PP Exhaustion Guard:** Attacks with `skill_top_left` up to `MAX_PRIMARY_TURNS`, then alternates between `skill_top_right` and `skill_bottom_left`.
-- **Built-in Safety:** Includes `DRY_RUN` mode, slight random click jitter (`CLICK_JITTER_PX`), watchdog stall logging, and `pyautogui.FAILSAFE` emergency stop.
-
----
-
-## Prerequisites
-
-- **OS:** Windows 10 / 11 (uses Windows DPI awareness and `pygetwindow`)
-- **Python:** 3.10 or newer
-- **Browser:** Any desktop browser running the game visibly on screen (e.g., Chrome, Brave, Edge)
+- **Background Browser Automation (WebApp Mode):** Runs the game in a dedicated Chromium session (`.browser_profile/`) with `page.screenshot()` and `page.mouse.click()`, leaving your main browser and physical mouse untouched.
+- **Interactive Map Node Picker:** Preview the live game canvas in the dashboard and click any node on the overworld map to save and farm custom coordinates.
+- **Custom Party Priority Order:** Enable/disable squad slots `1–6` and reorder their priority (e.g., `2 → 3 → 1`) so protected or low-level Mogas are skipped.
+- **Priority-Ordered 6-State FSM:** Evaluates states from `BATTLE_VICTORY` → `BATTLE_SELECT_MOGA` → `BATTLE_ACTIVE` → `BATTLE_READY` → `NODE_POPUP` → `MAP_IDLE`.
+- **Automatic Canvas Lock-On & Static-Ratio Scaling:** Detects the embedded game canvas inside the browser viewport (ignoring chat sidebars/toolbars) and scales templates uniformly.
+- **PP Exhaustion Guard & Dry-Run Mode:** Rotates fallback skills after `max_primary_turns` and supports dry-run logging without clicking.
+- **Classic Desktop Mode Included:** Still includes the standalone `mss` + `pyautogui` CLI runner (`python bot.py`).
 
 ---
 
 ## Project Structure
 
 ```text
-game_farm_bot/
+MonsterGalaxyAutoFarm/
 ├── README.md
+├── install.bat               # One-click Windows setup (creates .venv, installs deps & Chromium)
+├── start.bat                 # One-click Windows launcher (starts WebApp & opens dashboard)
 ├── requirements.txt          # Python dependencies
-├── config.py                 # Window title, thresholds, reference size, and normalized coordinates
-├── vision.py                 # DPI awareness, canvas detection, template matching, and HP scan
-├── bot.py                    # Main 6-state FSM loop and session logger
+├── config.py                 # Reference dimensions, template paths, and default coordinates
+├── vision.py                 # Canvas detection, template scaling/matching, and HP bar scanner
+├── settings_store.py         # Thread-safe JSON persistence (settings.json)
+├── engine.py                 # Background Playwright worker & 6-state FSM controller
+├── webapp.py                 # FastAPI server & API endpoints
+├── web/
+│   └── index.html            # WebApp dashboard UI (node picker, party priority, live logs)
+├── bot.py                    # Classic desktop-window CLI mode (mss + pyautogui)
 ├── tools/
-│   └── setup_wizard.py       # Calibration overlay generator and interactive ROI template cropper
+│   └── setup_wizard.py       # Interactive ROI template cropper & calibration overlay tool
 └── templates/                # Reference UI landmark PNGs
-    ├── battle_continue.png   # Victory "Continue" button
-    ├── choose_moga.png       # "CHOOSE YOUR MOGA" prompt
-    ├── battle_capture.png    # Combat "CAPTURE" button
-    ├── battle_red_go.png     # Battle ready red "GO!" button
-    ├── popup_go.png          # Stage modal "GO!" button
-    └── map_discord.png       # Overworld "DISCORD SERVER" sign
+    ├── battle_continue.png
+    ├── choose_moga.png
+    ├── battle_capture.png
+    ├── battle_red_go.png
+    ├── popup_go.png
+    └── map_discord.png
 ```
 
 ---
 
-## Installation
+## Prerequisites
 
-1. Clone the repository and enter the project directory:
+- **OS:** Windows 10 / 11 (WebApp mode also works on Linux/macOS; CLI `bot.py` uses Windows DPI APIs)
+- **Python:** 3.10 or newer
+
+---
+
+## Quick Start (Windows — Beginner Friendly)
+
+1. Make sure **Python 3.10+** is installed (check **"Add Python to PATH"** during setup).
+2. Double-click **`install.bat`** *(first time only)* — automatically creates `.venv`, installs all Python packages, and downloads Playwright Chromium.
+3. Double-click **`start.bat`** — starts the WebApp server and opens **http://127.0.0.1:8000** in your browser automatically.
+
+---
+
+## Manual Installation (Advanced / Non-Windows)
+
+1. Clone the repository and enter the folder:
    ```bash
-   git clone https://github.com/ArgoJR203/MonsterGalaxyAutoFarm
+   git clone https://github.com/ArgoJR203/MonsterGalaxyAutoFarm.git
    cd MonsterGalaxyAutoFarm
    ```
 
@@ -86,74 +76,61 @@ game_farm_bot/
    .venv\Scripts\activate
    ```
 
-3. Install dependencies:
+3. Install Python dependencies:
    ```bash
    python -m pip install -r requirements.txt
    ```
 
----
-
-## Configuration
-
-Edit [config.py](config.py) to customize behavior:
-
-| Setting | Default | Description |
-| :--- | :--- | :--- |
-| `WINDOW_TITLE` | `"Monster Galaxy"` | Case-insensitive substring of your game/browser window title |
-| `DRY_RUN` | `False` | If `True`, logs matched states and click coordinates without clicking |
-| `CONFIDENCE_THRESHOLD` | `0.85` | Minimum OpenCV template match score (`0.0–1.0`) |
-| `CANVAS_DETECT_THRESHOLD` | `0.80` | Minimum score for initial browser game-canvas lock-on |
-| `MAX_PRIMARY_TURNS` | `15` | Turns before rotating from `skill_top_left` to fallback skills |
-| `WATCHDOG_TIMEOUT` | `25.0` | Seconds without a recognized state before logging a warning |
-| `CLICK_JITTER_PX` | `3` | Random `±px` offset applied to each click |
-| `TEMPLATE_REF_SIZE` | `(1024, 890)` | Reference `(width, height)` of the game canvas for the templates |
-| `COORDS` | *(normalized)* | Relative `(0.0–1.0)` click targets for `farm_node`, skills, and `squad_slots` |
+4. Install Playwright's Chromium browser (required for WebApp mode):
+   ```bash
+   python -m playwright install chromium
+   ```
 
 ---
 
-## Usage
+## Usage (Recommended: WebApp Mode)
 
-### 1. Dry-Run Verification (Recommended First Run)
-1. Set `DRY_RUN = True` in [config.py](config.py).
-2. Open the game in your browser and ensure the tab is visible and unobstructed.
-3. Start the bot:
+1. Double-click **`start.bat`** (or run `python webapp.py`) and open **http://127.0.0.1:8000**.
+2. Click **Open Game Browser** — a dedicated Chromium window opens `https://monstergalaxy.online` (your login is saved locally in `.browser_profile/`).
+3. Log in once and navigate to the overworld map.
+4. Configure your setup in the WebApp UI:
+   - **Pick a Farm Node:** Click **Pick Node on Preview**, click any node on the live map preview, give it a name, and click **Save & Use**.
+   - **Set Party Priority:** Reorder slots `1–6` with `▲` / `▼` and uncheck any slot you want to skip.
+   - **Combat & Safety:** Choose primary skill, `Max Primary Turns`, `Confidence Threshold`, or toggle **Dry-Run**.
+5. Click **Start**. You can now cover the Playwright browser window with other apps or switch tabs in your main browser while the bot farms in the background.
+
+---
+
+## Usage (Classic CLI Mode)
+
+If you prefer running directly against your existing desktop browser window (note: uses your physical mouse cursor and requires the game window to stay visible on screen):
+
+1. Check `WINDOW_TITLE` and `DRY_RUN` in [config.py](config.py).
+2. Run:
    ```bash
    python bot.py
    ```
-4. Step through one battle manually and confirm the terminal logs `[DRY-RUN]` detections for all 6 states.
+3. Move your mouse cursor to `(0, 0)` top-left corner at any time for emergency stop, or press `Ctrl + C`.
 
-### 2. Live Farming
-1. Set `DRY_RUN = False` in [config.py](config.py).
-2. Keep the game window visible on screen (overworld map or mid-battle).
-3. Run:
-   ```bash
-   python bot.py
-   ```
-   On startup, the bot automatically locks onto the embedded game canvas (`[INIT] Locked onto game canvas: ...`) and begins farming.
+---
 
-### 3. Optional: Recalibrating Coordinates or Re-cropping Templates
-Pre-cropped templates are included in `templates/`. If you want to target a different farm node, adjust coordinates, or re-crop templates at your native resolution:
+## Optional: Recalibrating Templates
 
-1. Update `COORDS["farm_node"]` (or other coordinates) in [config.py](config.py).
-2. With the game visible, run:
-   ```bash
-   python tools/setup_wizard.py
-   ```
-3. Inspect the generated `calibration_overlay.png` to verify red/green dots align with the farm node, squad slots, HP bars, and skill buttons.
-4. Follow the terminal prompts to crop any templates (press `c` during selection to keep an existing template). If you re-crop all templates at a different native canvas size, update `TEMPLATE_REF_SIZE` and `TEMPLATE_REF_ORIGINS` in [config.py](config.py).
+If game UI buttons change, run the interactive cropper while your browser is visible:
 
-### Emergency Stop
-- **Mouse Failsafe:** Move your cursor to the **top-left corner `(0, 0)`** of the screen to abort immediately.
-- **Keyboard:** Focus the terminal and press `Ctrl + C`.
+```bash
+python tools/setup_wizard.py
+```
+
+Inspect `calibration_overlay.png` to confirm coordinate alignment.
 
 ---
 
 ## Troubleshooting
 
-- **`No visible window found containing 'Monster Galaxy'`**: Make sure the game tab is active in your browser, or set `WINDOW_TITLE` in `config.py` to match one of the window titles listed in the error output.
-- **`[INIT] Waiting for Monster Galaxy game canvas inside browser window...`**: Ensure the game canvas is visible (on the map, popup, or battle screen) and not covered by another window.
-- **`[WATCHDOG] No known screen matched for 25.0s`**: Check that your energy/coffee is not depleted, no unexpected modal is blocking the view, and the browser window is unobstructed.
-- **`[HALT] All 6 squad Mogas have 0 HP`**: All squad slots appear fainted. Heal your Mogas before restarting.
+- **Game pauses when Playwright window is minimized:** Do **not** minimize the Playwright Chromium window to the taskbar; instead, leave it open behind your other windows (the engine launches Chromium with background-throttling disabled for occluded windows).
+- **`[HALT] No enabled alive Mogas found in priority list`**: Either all enabled squad slots fainted (`0 HP`) or all slots are unchecked in the Party Priority editor.
+- **`[WATCHDOG] No known screen matched`**: Check for depleted energy/coffee or an unexpected modal in the game browser window.
 
 ---
 
