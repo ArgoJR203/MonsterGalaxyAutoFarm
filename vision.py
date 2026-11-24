@@ -10,7 +10,7 @@ import pygetwindow as gw
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SCALED_TEMPLATE_CACHE = {}
-_MAX_TEMPLATE_CACHE = 64
+_MAX_TEMPLATE_CACHE = 256
 
 
 def enable_dpi_awareness() -> None:
@@ -88,24 +88,36 @@ def grab_frame(sct: mss.mss, bbox: dict) -> np.ndarray:
     return cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
 
 
-def _get_scaled_template(template: np.ndarray, screen_shape: tuple, ref_size: tuple) -> np.ndarray:
-    """Uniformly scales template to match a static-aspect-ratio window size."""
-    screen_h, screen_w = screen_shape[:2]
-    ref_w, ref_h = ref_size
-    scale = min(screen_w / ref_w, screen_h / ref_h)
-    if abs(scale - 1.0) <= 0.02:
+def build_text_outline_mask(template_bgr: np.ndarray) -> np.ndarray:
+    """
+    Builds a foreground mask covering bright white text and its dark outline,
+    ignoring variable arena background pixels behind the label.
+    """
+    gray = cv2.cvtColor(template_bgr, cv2.COLOR_BGR2GRAY) if template_bgr.ndim == 3 else template_bgr
+    white = (gray > 200).astype(np.uint8) * 255
+    black = (gray < 40).astype(np.uint8) * 255
+    near_white = cv2.dilate(white, np.ones((5, 5), np.uint8), iterations=1)
+    return cv2.bitwise_or(white, cv2.bitwise_and(black, near_white))
+
+
+def _resize_template_cached(template: np.ndarray, scale: float, is_mask: bool = False) -> np.ndarray:
+    """Resizes template or mask by an explicit scale factor with bounded caching."""
+    if abs(scale - 1.0) <= 0.01:
         return template
 
     tmpl_h, tmpl_w = template.shape[:2]
     new_w = max(1, int(round(tmpl_w * scale)))
     new_h = max(1, int(round(tmpl_h * scale)))
 
-    cache_key = (id(template), new_w, new_h)
+    cache_key = (id(template), new_w, new_h, is_mask)
     cached = _SCALED_TEMPLATE_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    if is_mask:
+        interp = cv2.INTER_NEAREST
+    else:
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
     resized = cv2.resize(template, (new_w, new_h), interpolation=interp)
     if len(_SCALED_TEMPLATE_CACHE) >= _MAX_TEMPLATE_CACHE:
         _SCALED_TEMPLATE_CACHE.clear()
@@ -113,24 +125,62 @@ def _get_scaled_template(template: np.ndarray, screen_shape: tuple, ref_size: tu
     return resized
 
 
-def find_template(
-    screen: np.ndarray,
-    template: np.ndarray,
-    threshold: float,
-    ref_size: tuple | None = None,
-):
-    """Returns (center_x, center_y, confidence) relative to window if matched, else None."""
-    if ref_size is not None:
-        template = _get_scaled_template(template, screen.shape, ref_size)
+def _get_scaled_template(template: np.ndarray, screen_shape: tuple, ref_size: tuple) -> np.ndarray:
+    """Uniformly scales template to match a static-aspect-ratio window size."""
+    screen_h, screen_w = screen_shape[:2]
+    ref_w, ref_h = ref_size
+    scale = min(screen_w / ref_w, screen_h / ref_h)
+    return _resize_template_cached(template, scale)
+
+
+def _match_single(screen: np.ndarray, template: np.ndarray, threshold: float, mask: np.ndarray | None = None):
+    """Runs single-scale cv2.matchTemplate and returns (cx, cy, score) or None."""
     if screen.shape[0] < template.shape[0] or screen.shape[1] < template.shape[1]:
         return None
-    result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+    if mask is not None:
+        result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED, mask=mask)
+        if not np.isfinite(result).all():
+            result = np.nan_to_num(result, nan=-1.0, posinf=-1.0, neginf=-1.0)
+    else:
+        result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(result)
     if max_val >= threshold:
         h, w = template.shape[:2]
         cx = max_loc[0] + (w // 2)
         cy = max_loc[1] + (h // 2)
         return (cx, cy, float(max_val))
+    return None
+
+
+def find_template(
+    screen: np.ndarray,
+    template: np.ndarray,
+    threshold: float,
+    ref_size: tuple | None = None,
+    mask: np.ndarray | None = None,
+):
+    """Returns (center_x, center_y, confidence) relative to window if matched, else None."""
+    if mask is not None:
+        screen_in = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY) if screen.ndim == 3 else screen
+        tmpl_in = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY) if template.ndim == 3 else template
+    else:
+        screen_in = screen
+        tmpl_in = template
+
+    if ref_size is None:
+        return _match_single(screen_in, tmpl_in, threshold, mask=mask)
+
+    screen_h, screen_w = screen_in.shape[:2]
+    ref_w, ref_h = ref_size
+    base_scale = min(screen_w / ref_w, screen_h / ref_h)
+
+    for mult in (1.0, 0.985, 1.015, 0.97, 1.03, 0.955, 1.045):
+        scale = base_scale * mult
+        scaled_tmpl = _resize_template_cached(tmpl_in, scale, is_mask=False)
+        scaled_mask = _resize_template_cached(mask, scale, is_mask=True) if mask is not None else None
+        hit = _match_single(screen_in, scaled_tmpl, threshold, mask=scaled_mask)
+        if hit is not None:
+            return hit
     return None
 
 
@@ -220,19 +270,30 @@ def detect_game_canvas(
     }
 
 
-def find_first_alive_moga_slot(screen: np.ndarray, squad_slots: list, hp_y_offset: float):
+def find_first_alive_moga_slot(
+    screen: np.ndarray,
+    squad_slots: list,
+    hp_y_offset: float,
+    slot_priority: list[int] | None = None,
+):
     """
-    Inspects the HP bar band underneath each squad portrait (Slots 1-6).
+    Inspects the HP bar band underneath each squad portrait (Slots 1-6) in slot_priority order.
     Scans a small vertical window so minor browser-canvas offset shifts never miss the HP bar.
     Returns (slot_index_1_based, pixel_x, pixel_y) for the first alive Moga, or None.
     """
     h, w = screen.shape[:2]
-    y_pad_up = max(1, int(h * 0.004))
+    y_pad_up = max(4, int(h * 0.018))
     y_pad_down = max(4, int(h * 0.022))
     x_left = max(4, int(w * 0.018))
     x_right = max(2, int(w * 0.008))
 
-    for idx, (rel_x, rel_y) in enumerate(squad_slots, start=1):
+    if slot_priority is None:
+        order = list(range(1, len(squad_slots) + 1))
+    else:
+        order = [idx for idx in slot_priority if 1 <= int(idx) <= len(squad_slots)]
+
+    for idx in order:
+        rel_x, rel_y = squad_slots[idx - 1]
         px = int(w * rel_x)
         py = int(h * rel_y)
         hp_py = int(h * (rel_y + hp_y_offset))
@@ -249,14 +310,37 @@ def find_first_alive_moga_slot(screen: np.ndarray, squad_slots: list, hp_y_offse
         g = band[:, :, 1]
         r = band[:, :, 2]
 
-        # Alive bars are bright green/lime or yellow/orange; flat bar has low horizontal variance
-        alive_mask = ((g > 125) & ((g - b) > 25)) | ((r > 155) & (g > 70) & ((r - b) > 55))
+        # Separate green/lime HP bar vs yellow/orange low-HP bar so portrait fur does not false-positive
+        green_mask = (g > 125) & ((g - b) > 25)
+        orange_mask = (r > 155) & (g > 70) & ((r - b) > 55)
         for row_idx in range(band.shape[0]):
-            row_mask = alive_mask[row_idx]
-            match_frac = float(np.mean(row_mask))
-            if match_frac >= 0.65:
-                bar_std = float(np.std(g[row_idx][row_mask]))
-                if bar_std < 40.0:
-                    return (idx, px, py)
+            g_row = green_mask[row_idx]
+            if float(np.mean(g_row)) >= 0.65 and float(np.std(g[row_idx][g_row])) < 40.0:
+                return (idx, px, py)
+
+            o_row = orange_mask[row_idx]
+            if float(np.mean(o_row)) >= 0.80 and float(np.std(g[row_idx][o_row])) < 18.0:
+                return (idx, px, py)
 
     return None
+
+
+def is_skill_available(screen: np.ndarray, skill_norm_xy: tuple[float, float]) -> bool:
+    """
+    Checks whether an upper skill button is illuminated/usable rather than dimmed (0 PP).
+    """
+    h, w = screen.shape[:2]
+    px = int(w * skill_norm_xy[0])
+    py = int(h * skill_norm_xy[1])
+    dx = max(6, int(w * 0.045))
+    dy = max(4, int(h * 0.014))
+
+    x0, x1 = max(0, px - dx), min(w, px + dx + 1)
+    y0, y1 = max(0, py - dy), min(h, py + dy + 1)
+    if x1 <= x0 or y1 <= y0:
+        return False
+
+    blue = screen[y0:y1, x0:x1, 0]
+    mean_b = float(np.mean(blue))
+    p90_b = float(np.percentile(blue, 90))
+    return bool(mean_b >= 95.0 and p90_b >= 140.0)

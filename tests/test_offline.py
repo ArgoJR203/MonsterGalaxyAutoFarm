@@ -75,7 +75,7 @@ def black_out_slot_hp(img, slot_index_0_based):
     rx, ry = config.COORDS["squad_slots"][slot_index_0_based]
     px = int(w * rx)
     hp_py = int(h * (ry + config.HP_BAR_Y_OFFSET))
-    y_pad_up = max(2, int(h * 0.008))
+    y_pad_up = max(4, int(h * 0.018))
     y_pad_down = max(4, int(h * 0.022))
     x_left = max(4, int(w * 0.018))
     x_right = max(2, int(w * 0.008))
@@ -87,8 +87,8 @@ def black_out_slot_hp(img, slot_index_0_based):
 
 def main():
     templates = vision.load_templates(config.TEMPLATE_PATHS)
-    assert len(templates) == 6, f"Expected 6 templates, got {len(templates)}"
-    print("[PASS] Loaded all 6 templates.")
+    assert len(templates) == 8, f"Expected 8 templates, got {len(templates)}"
+    print("[PASS] Loaded all 8 templates.")
 
     # 1. Verify FSM state classification across all 7 real screenshots
     for label, img_path, expected_state in SCREENSHOT_EXPECTATIONS:

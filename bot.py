@@ -37,6 +37,7 @@ def click_normalized(bbox: dict, norm_xy: tuple, action_label: str) -> None:
 def run_farming_loop() -> None:
     vision.enable_dpi_awareness()
     templates = vision.load_templates(config.TEMPLATE_PATHS)
+    select_moga_mask = vision.build_text_outline_mask(templates["select_moga"])
     win_bbox = vision.get_game_window_bbox(config.WINDOW_TITLE)
 
     print(f"[INIT] Attached to window: '{win_bbox['title']}' ({win_bbox['width']}x{win_bbox['height']})")
@@ -44,6 +45,12 @@ def run_farming_loop() -> None:
 
     victories = 0
     turns_in_battle = 0
+    zero_alive_streak = 0
+    active_slot = None
+    exhausted_slots = set()
+    exhausted_skills = set()
+    last_skill_clicked = None
+    consecutive_active_clicks = 0
     last_state_time = time.time()
     start_time = time.time()
     canvas_offset = None
@@ -99,12 +106,45 @@ def run_farming_loop() -> None:
             }
             screen = vision.grab_frame(sct, bbox)
 
-            # PRIORITY 1: Victory Screen -> Click Continue
+            # PRIORITY 0a: Quest Complete Modal -> Click green checkmark button
             if hit := vision.find_template(
+                screen, templates["quest_ok"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
+            ):
+                turns_in_battle = 0
+                zero_alive_streak = 0
+                active_slot = None
+                exhausted_slots.clear()
+                exhausted_skills.clear()
+                last_skill_clicked = None
+                consecutive_active_clicks = 0
+                print(f"[STATE: QUEST_COMPLETE] (conf={hit[2]:.2f})")
+                perform_click(bbox, hit[0], hit[1], "Quest Complete OK")
+                last_state_time = time.time()
+                time.sleep(1.0)
+
+            # PRIORITY 0b: Accidental Capture Modal Failsafe -> Click top-right X to resume battle
+            elif hit := vision.find_template(
+                screen, templates["capture_modal"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
+            ):
+                zero_alive_streak = 0
+                consecutive_active_clicks = 0
+                print(f"[STATE: CAPTURE_POPUP] Closing capture modal (conf={hit[2]:.2f})")
+                click_normalized(bbox, config.COORDS["capture_close"], "Close Capture Modal")
+                last_state_time = time.time()
+                time.sleep(0.8)
+
+            # PRIORITY 1: Victory Screen -> Click Continue
+            elif hit := vision.find_template(
                 screen, templates["victory"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
             ):
                 victories += 1
                 turns_in_battle = 0
+                zero_alive_streak = 0
+                active_slot = None
+                exhausted_slots.clear()
+                exhausted_skills.clear()
+                last_skill_clicked = None
+                consecutive_active_clicks = 0
                 elapsed_min = max(0.01, (time.time() - start_time) / 60.0)
                 print(
                     f"[STATE: BATTLE_VICTORY] Run #{victories} complete "
@@ -116,32 +156,90 @@ def run_farming_loop() -> None:
 
             # PRIORITY 2: Choose Moga -> Select First Alive Squad Member
             elif hit := vision.find_template(
-                screen, templates["select_moga"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
+                screen,
+                templates["select_moga"],
+                config.CONFIDENCE_THRESHOLD,
+                config.TEMPLATE_REF_SIZE,
+                mask=select_moga_mask,
             ):
+                consecutive_active_clicks = 0
                 print(f"[STATE: BATTLE_SELECT_MOGA] (conf={hit[2]:.2f})")
+                preferred_order = [s for s in range(1, 7) if s not in exhausted_slots] or list(range(1, 7))
                 alive_slot = vision.find_first_alive_moga_slot(
-                    screen, config.COORDS["squad_slots"], config.HP_BAR_Y_OFFSET
+                    screen, config.COORDS["squad_slots"], config.HP_BAR_Y_OFFSET, preferred_order
                 )
                 if alive_slot is None:
+                    zero_alive_streak += 1
+                    if zero_alive_streak < 3:
+                        print(f"[WARN] No alive Moga detected (attempt {zero_alive_streak}/3) — retrying...")
+                        time.sleep(0.6)
+                        continue
                     print("[HALT] All 6 squad Mogas have 0 HP. Stopping bot safely.")
                     break
+                zero_alive_streak = 0
                 slot_num, sx, sy = alive_slot
+                active_slot = slot_num
+                exhausted_skills.clear()
+                turns_in_battle = 0
+                last_skill_clicked = None
                 perform_click(bbox, sx, sy, f"Select Alive Moga (Slot {slot_num})")
                 last_state_time = time.time()
                 time.sleep(0.9)
 
-            # PRIORITY 3: Active Combat -> Attack with Upper-Left Skill (with PP fallback)
+            # PRIORITY 3: Active Combat -> Upper-Left -> Upper-Right -> Switch Moga
             elif hit := vision.find_template(
                 screen, templates["combat_active"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
             ):
-                turns_in_battle += 1
-                if turns_in_battle <= config.MAX_PRIMARY_TURNS:
-                    skill_key = "skill_top_left"
-                elif turns_in_battle % 2 == 1:
-                    skill_key = "skill_top_right"
-                else:
-                    skill_key = "skill_bottom_left"
+                zero_alive_streak = 0
+                if active_slot is None:
+                    active_slot = 1
+                if consecutive_active_clicks >= 3 and last_skill_clicked is not None:
+                    exhausted_skills.add(last_skill_clicked)
+                    consecutive_active_clicks = 0
+                    print(f"[SKILL] {last_skill_clicked} unresponsive after 3 clicks -> marking out of PP.")
 
+                tl_ok = (
+                    "skill_top_left" not in exhausted_skills
+                    and turns_in_battle < config.MAX_PRIMARY_TURNS
+                    and vision.is_skill_available(screen, config.COORDS["skill_top_left"])
+                )
+                tr_ok = (
+                    "skill_top_right" not in exhausted_skills
+                    and vision.is_skill_available(screen, config.COORDS["skill_top_right"])
+                )
+
+                if tl_ok:
+                    skill_key = "skill_top_left"
+                elif tr_ok:
+                    skill_key = "skill_top_right"
+                    if "skill_top_left" not in exhausted_skills:
+                        exhausted_skills.add("skill_top_left")
+                        print("[SKILL] skill_top_left out/dimmed -> switching to skill_top_right")
+                else:
+                    if active_slot is not None:
+                        exhausted_slots.add(active_slot)
+                    remaining = [s for s in range(1, 7) if s not in exhausted_slots]
+                    next_alive = vision.find_first_alive_moga_slot(
+                        screen, config.COORDS["squad_slots"], config.HP_BAR_Y_OFFSET, remaining
+                    )
+                    if next_alive is None:
+                        print("[HALT] All alive Mogas are out of usable upper skills (PP). Stopping safely.")
+                        break
+                    next_slot, sx, sy = next_alive
+                    print(f"[SWITCH] Both upper skills exhausted on Slot {active_slot} -> switching to Slot {next_slot}")
+                    perform_click(bbox, sx, sy, f"Switch to Alive Moga (Slot {next_slot})")
+                    active_slot = next_slot
+                    exhausted_skills.clear()
+                    turns_in_battle = 0
+                    consecutive_active_clicks = 0
+                    last_skill_clicked = None
+                    last_state_time = time.time()
+                    time.sleep(1.2)
+                    continue
+
+                turns_in_battle += 1
+                consecutive_active_clicks += 1
+                last_skill_clicked = skill_key
                 click_normalized(
                     bbox,
                     config.COORDS[skill_key],
@@ -155,6 +253,7 @@ def run_farming_loop() -> None:
                 screen, templates["combat_ready"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
             ):
                 turns_in_battle = 0
+                consecutive_active_clicks = 0
                 print(f"[STATE: BATTLE_READY] (conf={hit[2]:.2f})")
                 perform_click(bbox, hit[0], hit[1], "Battle Red GO!")
                 last_state_time = time.time()
@@ -164,6 +263,7 @@ def run_farming_loop() -> None:
             elif hit := vision.find_template(
                 screen, templates["node_popup"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
             ):
+                consecutive_active_clicks = 0
                 print(f"[STATE: NODE_POPUP] (conf={hit[2]:.2f})")
                 perform_click(bbox, hit[0], hit[1], "Stage Popup GO!")
                 last_state_time = time.time()
@@ -173,6 +273,12 @@ def run_farming_loop() -> None:
             elif hit := vision.find_template(
                 screen, templates["map_idle"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
             ):
+                turns_in_battle = 0
+                active_slot = None
+                exhausted_slots.clear()
+                exhausted_skills.clear()
+                last_skill_clicked = None
+                consecutive_active_clicks = 0
                 print(f"[STATE: MAP_IDLE] (conf={hit[2]:.2f})")
                 click_normalized(bbox, config.COORDS["farm_node"], "Select Beach Farm Node")
                 last_state_time = time.time()
@@ -180,6 +286,7 @@ def run_farming_loop() -> None:
 
             # TRANSITION / ANIMATION POLLING
             else:
+                consecutive_active_clicks = 0
                 if time.time() - last_state_time > config.WATCHDOG_TIMEOUT:
                     print(
                         f"[WATCHDOG] No known screen matched for {config.WATCHDOG_TIMEOUT}s. "

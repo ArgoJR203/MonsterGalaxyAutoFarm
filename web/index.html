@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monster Galaxy Auto-Farm</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel-alt: #0b1220;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --indigo: #6366f1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 22px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+    .pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #334155;
+    }
+    .pill.idle { background: #334155; color: #e2e8f0; }
+    .pill.running { background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid #22c55e; }
+    .pill.paused { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; }
+    .pill.halted { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    button {
+      border: 1px solid var(--border);
+      background: #273449;
+      color: var(--text);
+      padding: 7px 13px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    button:hover { background: #334460; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.primary { background: var(--indigo); border-color: var(--indigo); }
+    button.primary:hover { background: #4f46e5; }
+    button.success { background: #16a34a; border-color: #16a34a; }
+    button.success:hover { background: #15803d; }
+    button.warn { background: #d97706; border-color: #d97706; }
+    button.danger { background: #dc2626; border-color: #dc2626; }
+    button.active-toggle { background: var(--accent); color: #0f172a; border-color: var(--accent); }
+    main {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 18px;
+    }
+    @media (max-width: 980px) {
+      main { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card h2 {
+      margin: 0;
+      font-size: 0.98rem;
+      font-weight: 700;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      grid-column: 1 / -1;
+    }
+    @media (max-width: 720px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .stat .label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .stat .value {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+    .preview-wrap {
+      position: relative;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      min-height: 360px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .preview-wrap.pick-mode {
+      cursor: crosshair;
+      outline: 2px solid var(--accent);
+    }
+    .preview-wrap img {
+      display: block;
+      max-width: 100%;
+      max-height: 540px;
+      user-select: none;
+    }
+    .preview-stage {
+      position: relative;
+      display: inline-block;
+    }
+    .node-marker {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      background: rgba(239, 68, 68, 0.85);
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .placeholder {
+      color: var(--muted);
+      font-size: 0.9rem;
+      text-align: center;
+      padding: 24px;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    input[type="text"], input[type="number"], select {
+      background: var(--panel-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 0.85rem;
+    }
+    input[type="text"] { flex: 1; min-width: 140px; }
+    select { flex: 1; min-width: 160px; }
+    .squad-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .squad-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+    }
+    .squad-item label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.88rem;
+      cursor: pointer;
+    }
+    .squad-item .order-badge {
+      font-size: 0.75rem;
+      color: var(--accent);
+      font-weight: 700;
+      min-width: 28px;
+    }
+    .squad-actions {
+      display: flex;
+      gap: 4px;
+    }
+    .squad-actions button {
+      padding: 3px 8px;
+      font-size: 0.78rem;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .logs {
+      grid-column: 1 / -1;
+    }
+    pre.log-box {
+      margin: 0;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      height: 200px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+    }
+    .hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>Monster Galaxy Auto-Farm</h1>
+      <span id="statusPill" class="pill idle">IDLE</span>
+      <span id="browserBadge" class="hint">Browser: Closed</span>
+    </div>
+    <div class="toolbar">
+      <button id="btnOpenBrowser" class="primary" onclick="postAction('/api/browser/open')">Open Game Browser</button>
+      <button id="btnStart" class="success" onclick="postAction('/api/bot/start')">Start</button>
+      <button id="btnPause" class="warn" onclick="postAction('/api/bot/pause')">Pause</button>
+      <button id="btnStop" class="danger" onclick="postAction('/api/bot/stop')">Stop</button>
+      <button id="btnCloseBrowser" onclick="postAction('/api/browser/close')">Close Browser</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="stats-grid">
+      <div class="stat">
+        <div class="label">Victories</div>
+        <div class="value" id="statVictories">0</div>
+      </div>
+      <div class="stat">
+        <div class="label">Runs / Min</div>
+        <div class="value" id="statRate">0.00</div>
+      </div>
+      <div class="stat">
+        <div class="label">Current State</div>
+        <div class="value" id="statState">-</div>
+      </div>
+      <div class="stat">
+        <div class="label">Canvas Lock</div>
+        <div class="value" id="statCanvas">Not Locked</div>
+      </div>
+    </section>
+
+    <!-- Left column: Live Canvas Preview & Interactive Node Picker -->
+    <section class="card">
+      <h2>
+        <span>Live Game Canvas &amp; Map Node Picker</span>
+        <span class="row">
+          <button id="btnPickNode" onclick="togglePickMode()">Pick Node on Preview</button>
+          <button onclick="postAction('/api/preview/refresh')">Refresh</button>
+        </span>
+      </h2>
+      <div id="previewWrap" class="preview-wrap">
+        <div id="previewPlaceholder" class="placeholder">
+          Click <strong>Open Game Browser</strong>, log into Monster Galaxy, and navigate to the overworld map.<br />
+          Your live game view will appear here without touching your main browser or cursor.
+        </div>
+        <div id="previewStage" class="preview-stage" style="display:none;">
+          <img id="previewImg" alt="Game Preview" />
+          <div id="nodeMarker" class="node-marker" title="Active Farm Node"></div>
+        </div>
+      </div>
+      <div class="hint" id="pickHint">
+        Active Node Marker (red dot). Toggle <strong>Pick Node on Preview</strong> and click on the map to set custom coordinates.
+      </div>
+    </section>
+
+    <!-- Right column: Configuration Controls -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <!-- Farm Node Config -->
+      <section class="card">
+        <h2>Farm Node Selection</h2>
+        <div class="row">
+          <select id="nodeSelect" onchange="onSelectNode()"></select>
+          <button onclick="deleteSelectedNode()">Delete</button>
+        </div>
+        <div class="hint" id="activeNodeCoords">Active coordinates: (0.1050, 0.6720)</div>
+        <div class="row">
+          <input type="text" id="newNodeName" placeholder="Node name (e.g. Windhym Hill)" />
+          <input type="number" id="newNodeX" step="0.001" min="0" max="1" placeholder="X" style="width:82px;" />
+          <input type="number" id="newNodeY" step="0.001" min="0" max="1" placeholder="Y" style="width:82px;" />
+          <button class="primary" onclick="saveNewNode()">Save &amp; Use</button>
+        </div>
+      </section>
+
+      <!-- Party / Squad Priority -->
+      <section class="card">
+        <h2>
+          <span>Party Priority Order (Slots 1–6)</span>
+          <span class="hint">Top enabled alive Moga is picked first</span>
+        </h2>
+        <div id="squadList" class="squad-list"></div>
+      </section>
+
+      <!-- Combat & Bot Settings -->
+      <section class="card">
+        <h2>Combat &amp; Bot Settings</h2>
+        <div class="form-grid">
+          <label class="field">
+            Primary Skill
+            <select id="primarySkill">
+              <option value="skill_top_left">Upper-Left (Slot 1)</option>
+              <option value="skill_top_right">Upper-Right (Slot 2)</option>
+            </select>
+          </label>
+          <label class="field">
+            Max Primary Turns (PP Guard)
+            <input type="number" id="maxTurns" min="1" max="99" value="15" />
+          </label>
+          <label class="field">
+            Confidence Threshold (<span id="confLabel">0.85</span>)
+            <input type="range" id="confThreshold" min="0.50" max="0.99" step="0.01" value="0.85"
+              oninput="document.getElementById('confLabel').textContent = Number(this.value).toFixed(2)" />
+          </label>
+          <label class="field" style="justify-content:center;">
+            <span>Execution Mode</span>
+            <span class="row" style="color:var(--text); margin-top:4px;">
+              <input type="checkbox" id="dryRun" /> Dry-Run (log only, no clicks)
+            </span>
+          </label>
+        </div>
+        <div class="row" style="justify-content:flex-end;">
+          <button class="primary" onclick="saveAllSettings()">Save Settings</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Logs -->
+    <section class="card logs">
+      <h2>Live Activity Logs</h2>
+      <pre id="logBox" class="log-box"></pre>
+    </section>
+  </main>
+
+  <script>
+    let currentSettings = null;
+    let canvasLocked = false;
+    let pickMode = false;
+    let squadState = []; // [{slot: 1..6, enabled: bool}]
+
+    async function postAction(url) {
+      await fetch(url, { method: "POST" });
+      await pollStatus();
+    }
+
+    function togglePickMode() {
+      pickMode = !pickMode;
+      const btn = document.getElementById("btnPickNode");
+      const wrap = document.getElementById("previewWrap");
+      btn.classList.toggle("active-toggle", pickMode);
+      wrap.classList.toggle("pick-mode", pickMode);
+      document.getElementById("pickHint").textContent = pickMode
+        ? "Click directly on a map node in the preview image above to capture its coordinates."
+        : "Active Node Marker (red dot). Toggle Pick Node on Preview and click on the map to set custom coordinates.";
+    }
+
+    document.getElementById("previewImg").addEventListener("click", (evt) => {
+      if (!pickMode) return;
+      if (!canvasLocked) {
+        alert("Wait until Canvas Lock is active (navigate to the game map/battle first) before picking node coordinates.");
+        return;
+      }
+      const img = evt.target;
+      const rect = img.getBoundingClientRect();
+      const nx = Math.min(1, Math.max(0, (evt.clientX - rect.left) / rect.width));
+      const ny = Math.min(1, Math.max(0, (evt.clientY - rect.top) / rect.height));
+      document.getElementById("newNodeX").value = nx.toFixed(4);
+      document.getElementById("newNodeY").value = ny.toFixed(4);
+      if (!document.getElementById("newNodeName").value.trim()) {
+        document.getElementById("newNodeName").value = "Custom Node";
+      }
+      updateMarker(nx, ny);
+      togglePickMode();
+    });
+
+    function buildSquadStateFromSettings(priorityList) {
+      const enabledSet = new Set(priorityList);
+      const list = priorityList.map((slot) => ({ slot, enabled: true }));
+      for (let s = 1; s <= 6; s++) {
+        if (!enabledSet.has(s)) {
+          list.push({ slot: s, enabled: false });
+        }
+      }
+      squadState = list;
+      renderSquadList();
+    }
+
+    function renderSquadList() {
+      const container = document.getElementById("squadList");
+      container.innerHTML = "";
+      let activeRank = 0;
+      squadState.forEach((item, idx) => {
+        if (item.enabled) activeRank++;
+        const row = document.createElement("div");
+        row.className = "squad-item";
+
+        const left = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = item.enabled;
+        cb.onchange = () => {
+          item.enabled = cb.checked;
+          renderSquadList();
+          saveAllSettings();
+        };
+
+        const badge = document.createElement("span");
+        badge.className = "order-badge";
+        badge.textContent = item.enabled ? `#${activeRank}` : "OFF";
+
+        const txt = document.createElement("span");
+        txt.textContent = `Slot ${item.slot}`;
+
+        left.appendChild(cb);
+        left.appendChild(badge);
+        left.appendChild(txt);
+
+        const actions = document.createElement("div");
+        actions.className = "squad-actions";
+
+        const up = document.createElement("button");
+        up.textContent = "▲";
+        up.disabled = idx === 0;
+        up.onclick = () => moveSquadSlot(idx, -1);
+
+        const down = document.createElement("button");
+        down.textContent = "▼";
+        down.disabled = idx === squadState.length - 1;
+        down.onclick = () => moveSquadSlot(idx, 1);
+
+        actions.appendChild(up);
+        actions.appendChild(down);
+
+        row.appendChild(left);
+        row.appendChild(actions);
+        container.appendChild(row);
+      });
+    }
+
+    function moveSquadSlot(idx, delta) {
+      const target = idx + delta;
+      if (target < 0 || target >= squadState.length) return;
+      const tmp = squadState[idx];
+      squadState[idx] = squadState[target];
+      squadState[target] = tmp;
+      renderSquadList();
+      saveAllSettings();
+    }
+
+    function updateMarker(nx, ny) {
+      const marker = document.getElementById("nodeMarker");
+      marker.style.left = `${nx * 100}%`;
+      marker.style.top = `${ny * 100}%`;
+      marker.style.display = canvasLocked ? "block" : "none";
+    }
+
+    function populateSettingsUI(settings) {
+      const select = document.getElementById("nodeSelect");
+      const nodes = settings.farm_nodes || {};
+      select.innerHTML = "";
+      Object.keys(nodes).forEach((name) => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        if (name === settings.active_node_name) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      const activeCoords = nodes[settings.active_node_name] || [0.105, 0.672];
+      document.getElementById("activeNodeCoords").textContent =
+        `Active coordinates: (${Number(activeCoords[0]).toFixed(4)}, ${Number(activeCoords[1]).toFixed(4)})`;
+      updateMarker(activeCoords[0], activeCoords[1]);
+
+      if (document.activeElement.id !== "primarySkill") {
+        document.getElementById("primarySkill").value = settings.primary_skill;
+      }
+      if (document.activeElement.id !== "maxTurns") {
+        document.getElementById("maxTurns").value = settings.max_primary_turns;
+      }
+      if (document.activeElement.id !== "confThreshold") {
+        document.getElementById("confThreshold").value = settings.confidence_threshold;
+        document.getElementById("confLabel").textContent = Number(settings.confidence_threshold).toFixed(2);
+      }
+      document.getElementById("dryRun").checked = Boolean(settings.dry_run);
+
+      if (squadState.length === 0) {
+        buildSquadStateFromSettings(settings.squad_priority || [1, 2, 3, 4, 5, 6]);
+      }
+    }
+
+    async function saveSettingsPayload(updates) {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      if (data.settings) {
+        currentSettings = data.settings;
+        populateSettingsUI(currentSettings);
+      }
+    }
+
+    async function onSelectNode() {
+      const name = document.getElementById("nodeSelect").value;
+      await saveSettingsPayload({ active_node_name: name });
+    }
+
+    async function saveNewNode() {
+      const name = document.getElementById("newNodeName").value.trim();
+      const nx = parseFloat(document.getElementById("newNodeX").value);
+      const ny = parseFloat(document.getElementById("newNodeY").value);
+      if (!name || Number.isNaN(nx) || Number.isNaN(ny)) {
+        alert("Enter a node name and valid X, Y coordinates (0.0 to 1.0), or use Pick Node on Preview.");
+        return;
+      }
+      const nodes = { ...(currentSettings?.farm_nodes || {}) };
+      nodes[name] = [nx, ny];
+      await saveSettingsPayload({ farm_nodes: nodes, active_node_name: name });
+      document.getElementById("newNodeName").value = "";
+    }
+
+    async function deleteSelectedNode() {
+      const nodes = { ...(currentSettings?.farm_nodes || {}) };
+      const keys = Object.keys(nodes);
+      if (keys.length <= 1) {
+        alert("At least one farm node must remain.");
+        return;
+      }
+      const selected = document.getElementById("nodeSelect").value;
+      delete nodes[selected];
+      const nextActive = Object.keys(nodes)[0];
+      await saveSettingsPayload({ farm_nodes: nodes, active_node_name: nextActive });
+    }
+
+    async function saveAllSettings() {
+      const squad_priority = squadState.filter((s) => s.enabled).map((s) => s.slot);
+      await saveSettingsPayload({
+        primary_skill: document.getElementById("primarySkill").value,
+        max_primary_turns: parseInt(document.getElementById("maxTurns").value, 10) || 15,
+        confidence_threshold: parseFloat(document.getElementById("confThreshold").value) || 0.85,
+        dry_run: document.getElementById("dryRun").checked,
+        squad_priority,
+      });
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch("/api/status");
+        const data = await res.json();
+
+        const pill = document.getElementById("statusPill");
+        pill.textContent = data.status.toUpperCase();
+        pill.className = `pill ${data.status}`;
+
+        document.getElementById("browserBadge").textContent =
+          data.browser_open ? "Browser: Open (Background)" : "Browser: Closed";
+
+        document.getElementById("statVictories").textContent = data.victories;
+        document.getElementById("statRate").textContent = Number(data.runs_per_min).toFixed(2);
+        document.getElementById("statState").textContent = data.current_fsm_state || "-";
+
+        canvasLocked = Boolean(data.canvas_locked);
+        document.getElementById("statCanvas").textContent = data.canvas_info
+          ? `${data.canvas_info.width}x${data.canvas_info.height} (${data.canvas_info.scale}x)`
+          : "Not Locked";
+
+        currentSettings = data.settings;
+        populateSettingsUI(data.settings);
+
+        const logBox = document.getElementById("logBox");
+        const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 32;
+        logBox.textContent = (data.logs || []).join("\n");
+        if (atBottom) logBox.scrollTop = logBox.scrollHeight;
+
+        const stage = document.getElementById("previewStage");
+        const placeholder = document.getElementById("previewPlaceholder");
+        if (data.browser_open) {
+          stage.style.display = "inline-block";
+          placeholder.style.display = "none";
+          document.getElementById("previewImg").src = `/api/preview.jpg?t=${Date.now()}`;
+        } else {
+          stage.style.display = "none";
+          placeholder.style.display = "block";
+        }
+      } catch (err) {
+        // Ignore transient disconnect
+      }
+    }
+
+    pollStatus();
+    setInterval(pollStatus, 1000);
+  </script>
+</body>
+</html>
