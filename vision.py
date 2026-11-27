@@ -344,3 +344,50 @@ def is_skill_available(screen: np.ndarray, skill_norm_xy: tuple[float, float]) -
     mean_b = float(np.mean(blue))
     p90_b = float(np.percentile(blue, 90))
     return bool(mean_b >= 95.0 and p90_b >= 140.0)
+
+
+def detect_enemy_rarity(screen: np.ndarray) -> str | None:
+    """
+    Detects target rare enemy tier ('super_rare', 'epic', 'legendary') via its
+    black-outlined colored enemy name and rarity label above the enemy HP bar.
+    Returns the matched tier key or None for Beginner/Uncommon/Rare.
+    """
+    h, w = screen.shape[:2]
+    y0, y1 = max(0, int(h * 0.155)), min(h, int(h * 0.210))
+    x0, x1 = max(0, int(w * 0.62)), min(w, int(w * 0.89))
+    if y1 <= y0 or x1 <= x0:
+        return None
+
+    roi = screen[y0:y1, x0:x1]
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    bgr = roi.astype(np.int16)
+    b, g, r = bgr[:, :, 0], bgr[:, :, 1], bgr[:, :, 2]
+    h_ch, s_ch, v_ch = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    dark_mask = ((r < 115) & (g < 75) & (b < 75)).astype(np.uint8) * 255
+    near_dark = cv2.dilate(dark_mask, np.ones((5, 5), np.uint8), iterations=1) > 0
+    mid = roi.shape[1] // 2
+    if mid <= 0:
+        return None
+
+    tier_masks = {
+        "legendary": ((h_ch <= 8) | (h_ch >= 172)) & (s_ch >= 110) & (v_ch >= 120) & near_dark,
+        "epic": (h_ch >= 12) & (h_ch <= 26) & (s_ch >= 125) & (v_ch >= 150) & near_dark,
+        "super_rare": (h_ch >= 135) & (h_ch <= 165) & (s_ch >= 75) & (v_ch >= 145) & near_dark,
+    }
+
+    best_tier = None
+    best_score = 0.0
+    for tier, mask in tier_masks.items():
+        total_density = float(np.mean(mask))
+        rarity_density = float(np.mean(mask[:, mid:]))
+        if total_density >= 0.010 and rarity_density >= 0.006 and total_density > best_score:
+            best_score = total_density
+            best_tier = tier
+
+    return best_tier
+
+
+def is_legendary_encounter(screen: np.ndarray) -> bool:
+    """Returns True if the current enemy header matches Legendary rarity."""
+    return detect_enemy_rarity(screen) == "legendary"

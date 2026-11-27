@@ -42,6 +42,10 @@ class FarmEngine:
         self._exhausted_skills: set[str] = set()
         self._last_skill_clicked: str | None = None
         self._consecutive_active_clicks = 0
+        self._legendary_alert = False
+        self._detected_tier: str | None = None
+        self._legendaries_found = 0
+        self._legendary_detected_at: float | None = None
         self._start_time: float | None = None
         self._last_state_time = time.time()
         self._canvas_offset: tuple[int, int, int, int] | None = None
@@ -78,13 +82,20 @@ class FarmEngine:
     def refresh_preview(self) -> None:
         self._cmd_queue.put(("refresh_preview", None))
 
+    def dismiss_legendary_alert(self) -> None:
+        with self._lock:
+            self._legendary_alert = False
+            self._detected_tier = None
+
     def update_settings(self, updates: dict) -> dict:
         saved = settings_store.save_settings(updates)
         with self._lock:
             self._settings = saved
         self._log(
             f"[SETTINGS] Saved: node='{saved['active_node_name']}', "
-            f"squad={saved['squad_priority']}, skill={saved['primary_skill']}, dry_run={saved['dry_run']}"
+            f"squad={saved['squad_priority']}, skill={saved['primary_skill']}, "
+            f"finder={saved['find_legendary']} ({saved['target_tiers']}), "
+            f"hunt_run={saved['run_from_non_legendary']}, dry_run={saved['dry_run']}"
         )
         return saved
 
@@ -104,6 +115,10 @@ class FarmEngine:
                 "turns_in_battle": self._turns_in_battle,
                 "canvas_locked": self._canvas_offset is not None,
                 "canvas_info": self._canvas_info,
+                "legendary_alert": self._legendary_alert,
+                "detected_tier": self._detected_tier,
+                "legendaries_found": self._legendaries_found,
+                "legendary_detected_at": self._legendary_detected_at,
                 "settings": self._settings,
                 "logs": list(self._logs),
             }
@@ -250,6 +265,8 @@ class FarmEngine:
             self._last_state_time = time.time()
             self._zero_alive_streak = 0
             self._consecutive_active_clicks = 0
+            self._legendary_alert = False
+            self._detected_tier = None
             if not was_paused:
                 self._victories = 0
                 self._reset_battle_tracking()
@@ -269,6 +286,8 @@ class FarmEngine:
         with self._lock:
             self._status = "idle"
             self._current_fsm_state = None
+            self._legendary_alert = False
+            self._detected_tier = None
             self._reset_battle_tracking()
         self._log("[BOT] Farming stopped.")
 
@@ -440,6 +459,23 @@ class FarmEngine:
         py = int(ch * norm_xy[1])
         self._click_canvas(offset, px, py, label, dry_run)
 
+    def _trigger_legendary_pause(self, state_name: str, tier: str = "legendary") -> float:
+        """Pauses automation and raises UI alert when a target rare Moga is encountered."""
+        tier_label = tier.replace("_", " ").title()
+        with self._lock:
+            self._status = "paused"
+            self._current_fsm_state = f"{tier.upper()}_FOUND"
+            self._legendary_alert = True
+            self._detected_tier = tier
+            self._legendaries_found += 1
+            self._legendary_detected_at = time.time()
+            self._zero_alive_streak = 0
+            self._consecutive_active_clicks = 0
+        self._log(
+            f"[RARE FOUND] {tier_label} Moga detected on {state_name}! Pausing bot for manual capture."
+        )
+        return 0.5
+
     def _run_fsm_tick(self) -> float:
         full_frame = self._grab_page_bgr()
         if full_frame is None:
@@ -461,6 +497,9 @@ class FarmEngine:
 
         threshold = float(settings["confidence_threshold"])
         dry_run = bool(settings["dry_run"])
+        find_legendary = bool(settings.get("find_legendary", False))
+        target_tiers = set(settings.get("target_tiers") or [])
+        run_from_non_legendary = find_legendary and bool(settings.get("run_from_non_legendary", False))
         max_primary_turns = int(settings["max_primary_turns"])
         primary_skill = settings["primary_skill"]
         squad_priority = list(settings["squad_priority"])
@@ -512,6 +551,10 @@ class FarmEngine:
             config.TEMPLATE_REF_SIZE,
             mask=self._select_moga_mask,
         ):
+            if find_legendary and target_tiers:
+                tier = vision.detect_enemy_rarity(screen)
+                if tier in target_tiers:
+                    return self._trigger_legendary_pause("BATTLE_SELECT_MOGA", tier)
             with self._lock:
                 self._current_fsm_state = "BATTLE_SELECT_MOGA"
                 self._last_state_time = time.time()
@@ -542,8 +585,21 @@ class FarmEngine:
             self._click_canvas(offset, sx, sy, f"Select Alive Moga (Slot {slot_num})", dry_run)
             return 0.9
 
-        # PRIORITY 3: Active Combat -> Primary Upper Skill -> Secondary Upper Skill -> Switch Moga
+        # PRIORITY 3: Active Combat -> Rare Tier Check / Hunt RUN / Upper Skills -> Switch Moga
         if hit := vision.find_template(screen, self._templates["combat_active"], threshold, config.TEMPLATE_REF_SIZE):
+            if find_legendary and target_tiers:
+                tier = vision.detect_enemy_rarity(screen)
+                if tier in target_tiers:
+                    return self._trigger_legendary_pause("BATTLE_ACTIVE", tier)
+            if run_from_non_legendary:
+                with self._lock:
+                    self._zero_alive_streak = 0
+                    self._consecutive_active_clicks = 0
+                    self._current_fsm_state = "BATTLE_ACTIVE"
+                    self._last_state_time = time.time()
+                self._log("[HUNT] Non-target Moga -> clicking RUN.")
+                self._click_canvas_norm(offset, config.COORDS["battle_run"], "Run (Hunt Mode)", dry_run)
+                return 1.2
             secondary_skill = "skill_top_right" if primary_skill == "skill_top_left" else "skill_top_left"
             with self._lock:
                 self._zero_alive_streak = 0
@@ -618,8 +674,12 @@ class FarmEngine:
             )
             return 0.7
 
-        # PRIORITY 4: Battle Ready -> Click Red GO!
+        # PRIORITY 4: Battle Ready -> Rare Tier Check or Click Red GO!
         if hit := vision.find_template(screen, self._templates["combat_ready"], threshold, config.TEMPLATE_REF_SIZE):
+            if find_legendary and target_tiers:
+                tier = vision.detect_enemy_rarity(screen)
+                if tier in target_tiers:
+                    return self._trigger_legendary_pause("BATTLE_READY", tier)
             with self._lock:
                 self._turns_in_battle = 0
                 self._consecutive_active_clicks = 0

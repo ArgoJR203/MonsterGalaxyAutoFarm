@@ -9,10 +9,14 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(PROJECT_ROOT, "settings.json")
 
 VALID_SKILLS = ("skill_top_left", "skill_top_right")
+VALID_TARGET_TIERS = ("super_rare", "epic", "legendary")
 
 DEFAULT_SETTINGS = {
     "game_url": "https://monstergalaxy.online",
     "dry_run": False,
+    "find_legendary": False,
+    "target_tiers": ["legendary"],
+    "run_from_non_legendary": False,
     "confidence_threshold": 0.85,
     "max_primary_turns": 15,
     "primary_skill": "skill_top_left",
@@ -40,6 +44,20 @@ def _sanitize_settings(raw: dict) -> dict:
     merged["game_url"] = url
 
     merged["dry_run"] = bool(merged.get("dry_run", False))
+    merged["find_legendary"] = bool(merged.get("find_legendary", False))
+    raw_tiers = merged.get("target_tiers", ["legendary"])
+    seen_tiers = set()
+    clean_tiers = []
+    if isinstance(raw_tiers, list):
+        for t in raw_tiers:
+            ts = str(t).strip().lower()
+            if ts in VALID_TARGET_TIERS and ts not in seen_tiers:
+                seen_tiers.add(ts)
+                clean_tiers.append(ts)
+    merged["target_tiers"] = clean_tiers
+    merged["run_from_non_legendary"] = (
+        bool(merged.get("run_from_non_legendary", False)) if merged["find_legendary"] else False
+    )
 
     try:
         conf = float(merged.get("confidence_threshold", 0.85))

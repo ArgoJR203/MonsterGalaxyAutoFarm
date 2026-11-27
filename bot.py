@@ -1,9 +1,15 @@
 """Main Finite State Machine (FSM) runner for automated resource farming."""
 
 import random
+import sys
 import time
 import mss
 import pyautogui
+
+if sys.platform == "win32":
+    import winsound
+else:
+    winsound = None
 
 import config
 import vision
@@ -162,6 +168,12 @@ def run_farming_loop() -> None:
                 config.TEMPLATE_REF_SIZE,
                 mask=select_moga_mask,
             ):
+                if config.FIND_LEGENDARY and (tier := vision.detect_enemy_rarity(screen)) in config.TARGET_TIERS:
+                    print(f"[RARE FOUND] {tier.replace('_', ' ').title()} Moga detected on BATTLE_SELECT_MOGA! Stopping safely.")
+                    if winsound is not None:
+                        for freq in (880, 1175, 1568):
+                            winsound.Beep(freq, 220)
+                    break
                 consecutive_active_clicks = 0
                 print(f"[STATE: BATTLE_SELECT_MOGA] (conf={hit[2]:.2f})")
                 preferred_order = [s for s in range(1, 7) if s not in exhausted_slots] or list(range(1, 7))
@@ -186,10 +198,24 @@ def run_farming_loop() -> None:
                 last_state_time = time.time()
                 time.sleep(0.9)
 
-            # PRIORITY 3: Active Combat -> Upper-Left -> Upper-Right -> Switch Moga
+            # PRIORITY 3: Active Combat -> Legendary Check / Hunt RUN / Upper-Left -> Upper-Right -> Switch Moga
             elif hit := vision.find_template(
                 screen, templates["combat_active"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
             ):
+                if config.FIND_LEGENDARY and (tier := vision.detect_enemy_rarity(screen)) in config.TARGET_TIERS:
+                    print(f"[RARE FOUND] {tier.replace('_', ' ').title()} Moga detected on BATTLE_ACTIVE! Stopping safely.")
+                    if winsound is not None:
+                        for freq in (880, 1175, 1568):
+                            winsound.Beep(freq, 220)
+                    break
+                if config.FIND_LEGENDARY and config.RUN_FROM_NON_LEGENDARY:
+                    zero_alive_streak = 0
+                    consecutive_active_clicks = 0
+                    print("[HUNT] Non-target Moga -> clicking RUN.")
+                    click_normalized(bbox, config.COORDS["battle_run"], "Run (Hunt Mode)")
+                    last_state_time = time.time()
+                    time.sleep(1.2)
+                    continue
                 zero_alive_streak = 0
                 if active_slot is None:
                     active_slot = 1
@@ -248,10 +274,16 @@ def run_farming_loop() -> None:
                 last_state_time = time.time()
                 time.sleep(0.7)
 
-            # PRIORITY 4: Battle Ready -> Click Red GO!
+            # PRIORITY 4: Battle Ready -> Legendary Check or Click Red GO!
             elif hit := vision.find_template(
                 screen, templates["combat_ready"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
             ):
+                if config.FIND_LEGENDARY and (tier := vision.detect_enemy_rarity(screen)) in config.TARGET_TIERS:
+                    print(f"[RARE FOUND] {tier.replace('_', ' ').title()} Moga detected on BATTLE_READY! Stopping safely.")
+                    if winsound is not None:
+                        for freq in (880, 1175, 1568):
+                            winsound.Beep(freq, 220)
+                    break
                 turns_in_battle = 0
                 consecutive_active_clicks = 0
                 print(f"[STATE: BATTLE_READY] (conf={hit[2]:.2f})")

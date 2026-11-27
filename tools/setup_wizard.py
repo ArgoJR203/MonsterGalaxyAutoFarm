@@ -16,7 +16,7 @@ import vision
 
 
 TEMPLATE_INSTRUCTIONS = [
-    ("map_idle", "templates/map_discord.png", "On the MAP screen, drag a box around the 'DISCORD SERVER' sign."),
+    ("map_idle", "templates/map_anchor.png", "On any overworld MAP screen, drag a box around the top-left gold-bordered downward chevron button."),
     ("node_popup", "templates/popup_go.png", "Open the node popup and drag a box around the light-blue 'GO!' button."),
     ("select_moga", "templates/choose_moga.png", "Enter battle and drag a box around the 'CHOOSE YOUR MOGA' text."),
     ("combat_ready", "templates/battle_red_go.png", "Pick a Moga and drag a box around the large red 'GO!' button."),
