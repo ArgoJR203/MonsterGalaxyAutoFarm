@@ -93,6 +93,12 @@ def api_preview_refresh():
     return {"ok": True}
 
 
+@app.post("/api/alert/dismiss")
+def api_alert_dismiss():
+    get_engine().dismiss_legendary_alert()
+    return {"ok": True}
+
+
 @app.post("/api/settings")
 def api_settings(payload: dict = Body(...)):
     saved = get_engine().update_settings(payload)

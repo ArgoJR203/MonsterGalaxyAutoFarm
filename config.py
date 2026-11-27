@@ -5,6 +5,9 @@ WINDOW_TITLE = "Monster Galaxy"
 
 # Execution flags
 DRY_RUN = False               # If True, logs detected states and target coordinates without clicking
+FIND_LEGENDARY = False        # If True, alerts & stops/pauses when a target rarity Moga appears
+TARGET_TIERS = ("legendary",) # Rarity tiers to stop/alert on ("super_rare", "epic", "legendary")
+RUN_FROM_NON_LEGENDARY = False # If True (with FIND_LEGENDARY), clicks RUN on non-target battles
 CONFIDENCE_THRESHOLD = 0.85   # Minimum OpenCV template match score (0.0 - 1.0)
 CANVAS_DETECT_THRESHOLD = 0.80 # Minimum score for multi-scale game canvas detection in browser windows
 MAX_PRIMARY_TURNS = 15        # Turn threshold before rotating to fallback skills (PP exhaustion guard)
@@ -18,7 +21,7 @@ TEMPLATE_REF_SIZE = (1024, 890)
 TEMPLATE_REF_ORIGINS = {
     "quest_ok": (464, 718),
     "capture_modal": (566, 374),
-    "map_idle": (150, 678),
+    "map_idle": (17, 88),
     "node_popup": (448, 676),
     "select_moga": (286, 626),
     "combat_ready": (454, 768),
@@ -35,13 +38,14 @@ TEMPLATE_PATHS = {
     "combat_active": "templates/battle_capture.png",
     "combat_ready": "templates/battle_red_go.png",
     "node_popup": "templates/popup_go.png",
-    "map_idle": "templates/map_discord.png",
+    "map_idle": "templates/map_anchor.png",
 }
 
 # Normalized (x, y) coordinates relative to the game window (0.0 to 1.0)
 COORDS = {
     "farm_node": (0.105, 0.672),
     "capture_close": (0.8125, 0.2607),
+    "battle_run": (0.895, 0.960),
     "skill_top_left": (0.315, 0.895),
     "skill_top_right": (0.685, 0.895),
     "squad_slots": [

@@ -410,6 +410,178 @@ def test_skill_availability_and_switch():
     print("[PASS] Upper-skill availability & mid-battle squad switch checks passed.")
 
 
+def test_legendary_detector_and_settings():
+    """Verify multi-tier rarity detection (Super Rare, Epic, Legendary), rejection, settings, and dismiss."""
+    sr_crop_path = (
+        r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5"
+        r"\.user_uploaded\media_1795764845474_f400609b.jpg"
+    )
+    ep_crop_path = (
+        r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5"
+        r"\.user_uploaded\media_1795764880446_cce985d4.jpg"
+    )
+    leg_crop_path = (
+        r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5"
+        r"\.user_uploaded\media_1795756493353_12bb1bd8.jpg"
+    )
+    img3_path = (
+        r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5"
+        r"\.user_uploaded\media_1795520215639_00426446.jpg"
+    )
+    yara_path = (
+        r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5"
+        r"\.user_uploaded\media_1795521307501_19267715.jpg"
+    )
+    if all(os.path.exists(p) for p in (sr_crop_path, ep_crop_path, leg_crop_path, img3_path)):
+        img3 = cv2.imread(img3_path, cv2.IMREAD_COLOR)
+        bh, bw = img3.shape[:2]
+
+        def make_synth(crop_path, crop_box):
+            crop = cv2.imread(crop_path, cv2.IMREAD_COLOR)
+            lh, lw = crop.shape[:2]
+            y0f, y1f, x0f, x1f = crop_box
+            hdr = crop[int(lh * y0f):int(lh * y1f), int(lw * x0f):int(lw * x1f)]
+            synth = img3.copy()
+            y0, y1 = int(bh * 0.145), int(bh * 0.255)
+            x0, x1 = int(bw * 0.56), int(bw * 0.90)
+            synth[y0:y1, x0:x1] = cv2.resize(hdr, (x1 - x0, y1 - y0), interpolation=cv2.INTER_AREA)
+            return synth
+
+        synth_sr = make_synth(sr_crop_path, (0.03, 0.21, 0.04, 0.96))
+        synth_ep = make_synth(ep_crop_path, (0.03, 0.21, 0.04, 0.96))
+        synth_lg = make_synth(leg_crop_path, (0.06, 0.27, 0.06, 0.94))
+
+        assert vision.detect_enemy_rarity(synth_sr) == "super_rare"
+        assert vision.detect_enemy_rarity(synth_ep) == "epic"
+        assert vision.detect_enemy_rarity(synth_lg) == "legendary"
+        assert vision.is_legendary_encounter(synth_lg) is True
+        synth_lg_075 = cv2.resize(synth_lg, (int(bw * 0.75), int(bh * 0.75)), interpolation=cv2.INTER_AREA)
+        assert vision.detect_enemy_rarity(synth_lg_075) == "legendary"
+
+        if os.path.exists(yara_path):
+            yara = cv2.imread(yara_path, cv2.IMREAD_COLOR)
+            yh, yw = yara.shape[:2]
+            s = yw / 1936.0
+            ox, oy = int(round(452 * s)), int(round(124 * s))
+            cw, ch = int(round(1034 * s)), min(yh - int(round(124 * s)), int(round(899 * s)))
+            yara_canvas = yara[oy:oy + ch, ox:ox + cw]
+            assert vision.detect_enemy_rarity(yara_canvas) == "super_rare"
+
+        non_rare_paths = [
+            img3_path,
+            r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5\.user_uploaded\media_1795520218061_f52e6ab0.jpg",
+            r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5\.user_uploaded\media_1795520222735_299644be.jpg",
+            r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5\.user_uploaded\media_1795525501062_ade8575d.jpg",
+            r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5\.user_uploaded\media_1795525922162_3dbf2781.jpg",
+        ]
+        for p in non_rare_paths:
+            if os.path.exists(p):
+                im = cv2.imread(p, cv2.IMREAD_COLOR)
+                assert vision.detect_enemy_rarity(im) is None, f"False positive rarity on {p}"
+    else:
+        print("[SKIP] Rarity reference crops not present; skipping pixel detector check.")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        s_path = os.path.join(tmp, "settings.json")
+        s1 = settings_store.save_settings(
+            {"find_legendary": False, "run_from_non_legendary": True, "target_tiers": ["epic", "invalid", "epic"]},
+            path=s_path,
+        )
+        assert s1["find_legendary"] is False and s1["run_from_non_legendary"] is False
+        assert s1["target_tiers"] == ["epic"]
+        s2 = settings_store.save_settings(
+            {"find_legendary": True, "run_from_non_legendary": True, "target_tiers": ["super_rare", "legendary"]},
+            path=s_path,
+        )
+        assert s2["find_legendary"] is True and s2["run_from_non_legendary"] is True
+        assert s2["target_tiers"] == ["super_rare", "legendary"]
+
+    orig_settings = settings_store.load_settings()
+    try:
+        with TestClient(webapp.app) as client:
+            eng = webapp.get_engine()
+            with eng._lock:
+                eng._legendary_alert = True
+                eng._detected_tier = "epic"
+                eng._legendaries_found = 1
+            st = client.get("/api/status").json()
+            assert st["legendary_alert"] is True and st["detected_tier"] == "epic"
+            r_dis = client.post("/api/alert/dismiss")
+            assert r_dis.status_code == 200
+            st2 = client.get("/api/status").json()
+            assert st2["legendary_alert"] is False and st2["detected_tier"] is None
+    finally:
+        if os.path.exists(settings_store.SETTINGS_PATH):
+            settings_store.save_settings(orig_settings)
+
+    print("[PASS] Multi-tier rarity detector (Super Rare/Epic/Legendary), settings, and alert checks passed.")
+
+
+def test_multi_island_map_idle():
+    """Verify universal map_idle anchor matches multiple islands and rejects battle screens."""
+    base_dir = r"C:\Users\AMD\.gemini\antigravity\brain\c198a83f-a176-47ff-93e3-e078228ce3a5\.user_uploaded"
+    island_paths = [
+        ("Island 1", os.path.join(base_dir, "media_1795520207439_0f0467a8.jpg")),
+        ("Island 1 Return", os.path.join(base_dir, "media_1795520233171_a99e1901.jpg")),
+        ("Island 2", os.path.join(base_dir, "media_1795765699457_328d0dfd.jpg")),
+    ]
+    if not all(os.path.exists(p) for _, p in island_paths):
+        print("[SKIP] Island reference screenshots not present; skipping multi-island map_idle check.")
+        return
+
+    templates = vision.load_templates(config.TEMPLATE_PATHS)
+    for label, path in island_paths:
+        im = cv2.imread(path, cv2.IMREAD_COLOR)
+        assert im is not None, f"Failed to load {path}"
+        hit = vision.find_template(
+            im, templates["map_idle"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
+        )
+        assert hit is not None and hit[2] >= config.CONFIDENCE_THRESHOLD, (
+            f"{label}: expected map_idle match >= {config.CONFIDENCE_THRESHOLD}, got {hit}"
+        )
+
+    # Also verify 0.75x scale on Island 2
+    im2 = cv2.imread(island_paths[2][1], cv2.IMREAD_COLOR)
+    h2, w2 = im2.shape[:2]
+    im2_075 = cv2.resize(im2, (int(round(w2 * 0.75)), int(round(h2 * 0.75))), interpolation=cv2.INTER_AREA)
+    hit2_075 = vision.find_template(
+        im2_075, templates["map_idle"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
+    )
+    assert hit2_075 is not None and hit2_075[2] >= config.CONFIDENCE_THRESHOLD, (
+        f"Island 2 [0.75x]: expected map_idle match, got {hit2_075}"
+    )
+
+    # Verify map_idle does NOT trigger on battle screens
+    battle_paths = [
+        os.path.join(base_dir, "media_1795520215639_00426446.jpg"),
+        os.path.join(base_dir, "media_1795520218061_f52e6ab0.jpg"),
+        os.path.join(base_dir, "media_1795520222735_299644be.jpg"),
+        os.path.join(base_dir, "media_1795520225968_f46f7388.jpg"),
+        os.path.join(base_dir, "media_1795525922162_3dbf2781.jpg"),
+        os.path.join(base_dir, "media_1795526560424_00a3ad06.jpg"),
+    ]
+    for p in battle_paths:
+        if os.path.exists(p):
+            bim = cv2.imread(p, cv2.IMREAD_COLOR)
+            fp = vision.find_template(
+                bim, templates["map_idle"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
+            )
+            assert fp is None, f"Unexpected map_idle false positive on battle screen {p}: {fp}"
+
+    # Verify NODE_POPUP still beats MAP_IDLE on popup screenshot
+    popup_path = os.path.join(base_dir, "media_1795520210855_5e9fa74d.jpg")
+    if os.path.exists(popup_path):
+        pim = cv2.imread(popup_path, cv2.IMREAD_COLOR)
+        p_hit = vision.find_template(
+            pim, templates["node_popup"], config.CONFIDENCE_THRESHOLD, config.TEMPLATE_REF_SIZE
+        )
+        assert p_hit is not None and p_hit[2] >= config.CONFIDENCE_THRESHOLD, (
+            f"Expected node_popup match on popup screenshot, got {p_hit}"
+        )
+
+    print("[PASS] Multi-island universal map_idle & battle rejection checks passed.")
+
+
 if __name__ == "__main__":
     test_squad_priority()
     test_settings_store()
@@ -420,4 +592,6 @@ if __name__ == "__main__":
     test_background_invariant_victory()
     test_quest_and_capture_failsafes()
     test_skill_availability_and_switch()
+    test_legendary_detector_and_settings()
+    test_multi_island_map_idle()
     print("\nALL WEBAPP TESTS PASSED.")

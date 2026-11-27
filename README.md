@@ -15,7 +15,8 @@ Run the game inside an isolated background Playwright Chromium browser so you ca
 - **Quest Complete Auto-Dismiss (`✓`):** Automatically clicks the checkmark button when a `QUEST COMPLETE!` popup appears on the map.
 - **Accidental Capture Modal Failsafe (`X`):** Detects if `CAPTURE` was accidentally opened mid-battle and closes it automatically so combat resumes.
 - **Smart Upper-Skill PP Fallback & Mid-Battle Squad Switching:** Uses only **Upper-Left** and **Upper-Right** skills (never the two lower skills). Automatically detects when the primary upper skill is dimmed/out of PP and switches to the secondary upper skill; when **both** upper skills are out of PP, automatically swaps to the next alive team member in your party priority order (or halts safely if all enabled Mogas are out of PP).
-- **Multi-Arena Background-Invariant Vision:** Uses DOM `<canvas>` locking in Playwright, micro-scale template matching, masked `CHOOSE YOUR MOGA` text matching, and trimmed `Continue` button matching so the bot works reliably across different map and arena backgrounds.
+- **Multi-Island & Multi-Arena Background-Invariant Vision:** Uses a universal overworld map anchor (`templates/map_anchor.png`), DOM `<canvas>` locking in Playwright, micro-scale template matching, masked `CHOOSE YOUR MOGA` text matching, and trimmed `Continue` button matching so the bot works reliably across any world map/island and arena background. (When switching to a new island or node, use **Pick Node on Preview** in the WebApp or update `COORDS["farm_node"]`.)
+- **Rare Moga Finder & Hunt Mode (Super Rare / Epic / Legendary):** Detects target rarity encounters (`Super Rare`, `Epic`, and/or `Legendary`) by their colored enemy header, immediately pauses the bot with a glowing dashboard banner and Web Audio chime so you can capture manually, and optionally auto-RUNs from non-target Mogas to hunt faster.
 - **3-Tick Alive Check Debounce & Dry-Run Mode:** Retries transient battle-entry frames before halting, and supports dry-run logging without clicking.
 - **Classic Desktop Mode Included:** Still includes the standalone `mss` + `pyautogui` CLI runner (`python bot.py`).
 
@@ -47,7 +48,7 @@ MonsterGalaxyAutoFarm/
     ├── battle_capture.png
     ├── battle_red_go.png
     ├── popup_go.png
-    └── map_discord.png
+    └── map_anchor.png        # Universal overworld top-left chevron anchor (all islands)
 ```
 
 ---
@@ -101,7 +102,7 @@ MonsterGalaxyAutoFarm/
 4. Configure your setup in the WebApp UI:
    - **Pick a Farm Node:** Click **Pick Node on Preview**, click any node on the live map preview, give it a name, and click **Save & Use**.
    - **Set Party Priority:** Reorder slots `1–6` with `▲` / `▼` and uncheck any slot you want to skip.
-   - **Combat & Safety:** Choose primary skill (Upper-Left or Upper-Right), `Max Primary Turns`, `Confidence Threshold`, or toggle **Dry-Run**.
+   - **Combat & Safety:** Choose primary skill (Upper-Left or Upper-Right), `Max Primary Turns`, `Confidence Threshold`, toggle **Dry-Run**, or enable **Rare Moga Finder** (select `Super Rare`, `Epic`, and/or `Legendary` plus optional **Hunt Mode** to auto-RUN from non-target Mogas).
 5. Click **Start**. You can now cover the Playwright browser window with other apps or switch tabs in your main browser while the bot farms in the background.
 
 ---
